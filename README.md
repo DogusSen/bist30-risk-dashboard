@@ -17,7 +17,7 @@ Yüksek lisans tezi kapsamında geliştirilmiş, BIST30 hisselerinin canlı risk
 **Python 3.9+ gereklidir.**
 
 ```bash
-git clone https://github.com/KULLANICI_ADIN/bist30-risk-dashboard.git
+git clone https://github.com/DogusSen/bist30-risk-dashboard.git
 cd bist30-risk-dashboard
 
 python3 -m venv venv
