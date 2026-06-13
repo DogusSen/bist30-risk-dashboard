@@ -6,7 +6,9 @@ import numpy as np
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+
+TZ_TR = timezone(timedelta(hours=3))
 import traceback
 import os
 
@@ -155,7 +157,7 @@ def calculate_risk_metrics():
         with _lock:
             _risk_data = results
             _price_data = clean_df
-            _last_update = datetime.now().strftime("%d.%m.%Y %H:%M")
+            _last_update = datetime.now(TZ_TR).strftime("%d.%m.%Y %H:%M")
 
         print(f"{len(results)} hisse için risk metrikleri hesaplandı.")
     except Exception:
