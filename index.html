@@ -536,6 +536,25 @@ footer{border-top:1px solid var(--border-dim);padding:2rem 0;text-align:center}
 </div>
 
 <script>
+/*
+ * BIST30 Risk Portalı — Frontend (Vanilla JS)
+ * =============================================
+ * Bu dosya tek sayfalık uygulamanın tüm arayüz mantığını içerir.
+ * Dış bağımlılıklar: Plotly.js (grafikler), SheetJS (Excel export), DOMPurify (XSS koruması)
+ *
+ * Ana bölümler:
+ *   1. Sabit veriler ve yardımcı fonksiyonlar
+ *   2. Hisse kartları ve sıralama (risk tablosu)
+ *   3. Kategori filtreleme ve arama
+ *   4. Hisse detay kartı ve Ridge Regression tahmin grafiği
+ *   5. Portföy Simülatörü (kovaryans bazlı analiz)
+ *   6. Hisse Karşılaştırma (radar grafik)
+ *   7. Excel dışa aktarma
+ *   8. Veri yükleme ve otomatik yenileme
+ */
+
+/* ── SABİT VERİLER ── */
+// Her ticker koduna karşılık gelen tam şirket adı (arayüzde gösterim için)
 const CO = {
   AKBNK:"Akbank T.A.Ş.", ARCLK:"Arçelik A.Ş.", ASELS:"Aselsan A.Ş.",
   BIMAS:"BİM Birleşik Mağazalar", DOHOL:"Doğan Holding A.Ş.",
@@ -552,16 +571,20 @@ const CO = {
   TOASO:"Tofaş Oto. Fab. A.Ş.", TUPRS:"Tüpraş A.Ş.",
   YKBNK:"Yapı ve Kredi Bankası A.Ş."
 };
+// Risk kategorisi → renk kodu (1=yeşil Defansif, 2=mavi Dengeli, 3=turuncu Dinamik, 4=kırmızı Agresif)
 const RC = {1:"#00ff7f",2:"#00d4ff",3:"#ffaa00",4:"#ff3a3a"};
-let allData = [], activeF = "all";
+let allData = [], activeF = "all"; // allData: API'den gelen tüm hisse verisi
 
-/* Clock */
+/* ── CANLI SAAT ── */
+// Her saniye güncellenen dijital saat (Türkçe locale ile HH:MM:SS formatında)
 setInterval(()=>{
   document.getElementById("clock").textContent =
     new Date().toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
 },1000);
 
-/* Build sparkline SVG string (numbers only — no user content) */
+/* ── MİNİGRAFİK (SPARKLINE) ── */
+// Son 60 günlük fiyat hareketini gösteren küçük çizgi grafik.
+// Sayısal veriden SVG oluşturulur; innerHTML kullanılmadan önce DOMPurify ile temizlenir.
 function buildSparkSVG(data, color, up){
   const W=200, H=34;
   const mn=Math.min(...data), mx=Math.max(...data), r=mx-mn||1;
@@ -573,7 +596,10 @@ function buildSparkSVG(data, color, up){
     `</svg>`;
 }
 
-/* Build card using DOM (avoids innerHTML with dynamic data) */
+/* ── HİSSE KARTI ── */
+// Her hisse için bir kart DOM elementi oluşturur.
+// Güvenlik: kullanıcıdan gelmeyen veriler bile DOM API ile eklenir (innerHTML yerine textContent).
+// Kartlar: ticker, şirket adı, anlık fiyat, sparkline, risk metrikleri, 2026 tahmini içerir.
 function mkCard(s, idx){
   const color = RC[s.category_level];
   const co = CO[s.ticker] || s.ticker;
@@ -732,10 +758,13 @@ document.querySelectorAll(".fbtn").forEach(b=>{
   });
 });
 
-/* Stats — removed from UI, kept as no-op */
+/* Stats — arayüzden kaldırıldı, fonksiyon boş tutuldu */
 function renderStats(data){}
 
-/* Ranking chart — custom HTML */
+/* ── RİSK SIRALAMA TABLOSU ── */
+// Tüm hisseleri risk skoruna göre (en yüksekten en düşüğe) sıralar.
+// Her kategori grubu için başlık + yatay bar grafik oluşturulur.
+// Bar genişliği: hissenin risk skoru / grup içindeki maksimum risk skoru × %100
 function renderRank(data){
   const sorted=[...data].sort((a,b)=>b.risk_score-a.risk_score); // en riskli üstte
   const wrap=document.getElementById("rank-wrap");
@@ -860,9 +889,16 @@ function openDetail(s){
     });
 }
 
+/* ── TAHMİN GRAFİĞİ ── */
+// Üç katmanlı Plotly çizgi grafiği:
+//   Gri  → Tarihsel gerçek fiyat (10 yıl)
+//   Mavi → Backtest: modelin test kümesindeki tahminleri (doğrulama)
+//   Sarı → 2026 tahmini: yinelemeli Ridge Regression çıktısı
+// dragmode:"zoom" ile kullanıcı zaman aralığını yakınlaştırabilir (sadece bu grafik).
+// Önceki Plotly instance'ı purge edilmeden yenisi eklenmez (DOM kirliliği önlenir).
 function renderForecast(d,s,color){
   const fcEl = document.getElementById("fc-chart");
-  Plotly.purge(fcEl);
+  Plotly.purge(fcEl);   // Önceki grafiği ve event listener'larını temizle
   fcEl.textContent = "";
   Plotly.newPlot("fc-chart",[
     {
@@ -926,7 +962,9 @@ function closeDetail(){
 function overlayClick(e){if(e.target===document.getElementById("overlay"))closeDetail();}
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDetail();});
 
-/* ── EXCEL EXPORT ── */
+/* ── EXCEL DIŞA AKTARMA ── */
+// SheetJS kütüphanesi ile risk metriklerini .xlsx formatında indirir.
+// Tüm hisseler, risk skoru, kategori ve tahmin değerleri tabloya eklenir.
 function exportExcel(){
   if(!allData.length) return;
   const now = new Date();
@@ -1006,14 +1044,23 @@ async function pollUntilReady(){
   }
 }
 
-/* 30 dakikada bir otomatik yenile */
+/* Otomatik yenileme: her 30 dakikada bir backend'e yeni veri hesaplat */
 setInterval(()=>triggerRefresh(), 30*60*1000);
 
 /* ══════════════════════════════════════════
    PORTFÖY SİMÜLATÖRÜ
+   ------------------------------------------
+   Kullanıcı 2-10 hisse seçer, her birine ağırlık (%  ) atar.
+   Backend'e gönderilen ağırlıklar normalize edilir (toplamı 1'e çevrilir).
+   Backend kovaryans matrisi ile portföy volatilitesini hesaplar:
+     σ_p = √(w^T × Σ × w)
+   Sonuçlar: yıllık volatilite, maks. drawdown, ağırlıklı risk skoru, kategori ve grafik.
 ══════════════════════════════════════════ */
-let portSel = new Set();
+let portSel = new Set(); // Seçili hisse ticker kodları
 
+// Portföy chip listesini oluşturur. Event delegation: her chip için ayrı listener yerine
+// parent wrapper'a tek listener atanır; tıklanan elementin chip olup olmadığı kontrol edilir.
+// Bu yöntem, chip listesi yenilendiğinde listener'ın birikmesini önler (wrap.onclick = overwrite).
 function initPortfolio(){
   const wrap = document.getElementById("port-chips");
   wrap.textContent = "";
@@ -1095,6 +1142,7 @@ function renderPortSelected(){
   updatePortTotal();
 }
 
+// Ağırlık toplamını hesaplar; %100'e yakınsa yeşil, değilse turuncu gösterir
 function updatePortTotal(){
   let total = 0;
   document.querySelectorAll(".psr-inp").forEach(i=>total+=parseFloat(i.value)||0);
@@ -1103,6 +1151,8 @@ function updatePortTotal(){
   el.style.color = Math.abs(total-100)<0.5 ? "#00ff7f" : "#ffaa00";
 }
 
+// Tüm hisseleri eşit ağırlığa ayarlar: 100% / hisse sayısı
+// Bar genişliğini ve toplam göstergesini günceller, buton kısa süre yeşil yanar (geri bildirim)
 function equalizeWeights(){
   const inputs = document.querySelectorAll(".psr-inp");
   if(!inputs.length) return;
@@ -1184,8 +1234,13 @@ function renderPortResults(d){
 
 /* ══════════════════════════════════════════
    HİSSE KARŞILAŞTIRMA
+   ------------------------------------------
+   Maksimum 4 hisse seçilip radar (örümcek ağı) grafiği ile karşılaştırılır.
+   Eksenler: Risk Skoru, Volatilite, Maks. Drawdown, 52H Yüksek/Düşük Oranı, Tahmini Değişim
+   Her hissenin metrikleri [0,1] aralığına normalize edilerek radar üzerinde gösterilir.
+   Ayrıca altında karşılaştırmalı metrik tablosu oluşturulur.
 ══════════════════════════════════════════ */
-let cmpSel = new Set();
+let cmpSel = new Set(); // Karşılaştırma için seçili hisseler (maks. 4)
 
 function initComparison(){
   const wrap = document.getElementById("cmp-chips");
@@ -1232,8 +1287,11 @@ function toggleCmp(ticker, chip){
   }
 }
 
+// Radar grafiği: seçili hisselerin risk metriklerini karşılaştırır.
+// Her eksen tüm hisseler içindeki maksimum değere göre 0-100 arasına normalize edilir.
 function renderRadar(){
   const sel = [...cmpSel].map(t=>allData.find(s=>s.ticker===t)).filter(Boolean);
+  // Normalizasyon tabanları: tüm hisseler içindeki en yüksek değerler
   const maxVol = Math.max(...allData.map(s=>s.volatility));
   const maxDD  = Math.max(...allData.map(s=>s.max_drawdown));
 
@@ -1299,7 +1357,10 @@ function renderRadar(){
   tw.appendChild(table);
 }
 
-/* ── DATA LOAD ── */
+/* ── VERİ YÜKLEME ── */
+// Sayfa ilk açıldığında backend'i polling ile yoklar (2 sn aralıklarla, maks. 90 deneme).
+// Backend'deki veri hazır olunca tüm bileşenler render edilir ve loader ekranı kapanır.
+// Yükleme mesajları animasyonlu şekilde döner (MSGS dizisinden sırayla).
 const MSGS=[
   "Canlı veriler yükleniyor...","BIST30 hisseleri indiriliyor...",
   "Risk metrikleri hesaplanıyor...","Volatilite analizi...",
