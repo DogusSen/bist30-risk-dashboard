@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 import yfinance as yf
 import pandas as pd
@@ -8,6 +8,9 @@ from sklearn.preprocessing import StandardScaler
 import threading
 from datetime import datetime, date
 import traceback
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
 
@@ -168,8 +171,9 @@ async def startup():
 
 
 @app.get("/")
+@app.head("/")
 async def root():
-    with open("index.html", "r", encoding="utf-8") as f:
+    with open(os.path.join(BASE_DIR, "index.html"), "r", encoding="utf-8") as f:
         return HTMLResponse(f.read())
 
 
