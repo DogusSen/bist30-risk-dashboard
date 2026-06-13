@@ -378,7 +378,7 @@ footer{border-top:1px solid var(--border-dim);padding:2rem 0;text-align:center}
 .psr-inp:focus{border-color:var(--cyan)}
 .psr-rm{background:transparent;border:none;color:var(--text-3);cursor:pointer;font-size:1rem;padding:0;line-height:1;transition:color .15s}
 .psr-rm:hover{color:#ff3a3a}
-.port-actions{display:flex;gap:.6rem;margin-top:1.2rem}
+.port-actions{display:flex;gap:.6rem;margin-top:1.2rem;position:relative;z-index:10}
 .port-calc{background:rgba(0,212,255,.1)!important;border-color:var(--cyan)!important;color:var(--cyan)!important}
 .port-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--border-dim);margin:1.5rem 0 0}
 .pm{background:var(--bg-1);padding:1rem 1.25rem}
@@ -1058,6 +1058,11 @@ function renderPortSelected(){
   const wrap = document.getElementById("port-selected-wrap");
   wrap.style.display = portSel.size > 0 ? "block" : "none";
   list.textContent = "";
+  // clear old results so Plotly layer doesn't block buttons
+  const res = document.getElementById("port-results");
+  const pc = document.getElementById("port-chart");
+  if(pc) try{ Plotly.purge(pc); }catch(_){}
+  res.style.display = "none"; res.textContent = "";
   const eq = portSel.size ? (100/portSel.size).toFixed(1) : 0;
   portSel.forEach(ticker=>{
     const s = allData.find(x=>x.ticker===ticker);
@@ -1100,6 +1105,7 @@ function updatePortTotal(){
 
 function equalizeWeights(){
   const inputs = document.querySelectorAll(".psr-inp");
+  if(!inputs.length) return;
   const eq = (100/inputs.length).toFixed(1);
   inputs.forEach(inp=>{
     inp.value = eq;
@@ -1107,6 +1113,9 @@ function equalizeWeights(){
     if(fill) fill.style.width = eq + "%";
   });
   updatePortTotal();
+  // visual feedback
+  const btn = document.querySelector(".port-actions .fbtn");
+  if(btn){ btn.style.borderColor="#00ff7f"; btn.style.color="#00ff7f"; setTimeout(()=>{ btn.style.borderColor=""; btn.style.color=""; },700); }
 }
 
 async function calcPortfolio(){
