@@ -658,15 +658,19 @@ function mkCard(s, idx){
   }
   el.appendChild(sparkDiv);
 
-  /* metrics */
+  /* Metrik ızgarası: 2 sütunlu grid — Volatilite ve 2026 Tahmini */
   const meta = document.createElement("div");
   meta.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:.35rem;position:relative;z-index:1";
+
+  // 2026 yıl sonu tahmini: backend'den gelen year_end_forecast değeri formatlanır
   const forecastVal = s.year_end_forecast != null
     ? `₺${s.year_end_forecast.toLocaleString("tr-TR",{minimumFractionDigits:2})}`
     : "—";
+  // Tahminin mevcut fiyata göre yüzde değişimi: (tahmin - güncel) / güncel × 100
   const forecastChg = (s.year_end_forecast != null && s.current_price)
     ? ((s.year_end_forecast - s.current_price) / s.current_price * 100)
     : null;
+  // Pozitif tahmin → yeşil (r1), negatif → kırmızı (r4)
   const forecastColor = forecastChg == null ? "var(--text-2)" : forecastChg >= 0 ? "var(--r1)" : "var(--r4)";
   const forecastChgStr = forecastChg != null ? ` (${forecastChg>=0?"+":""}${forecastChg.toFixed(1)}%)` : "";
   [
@@ -686,7 +690,7 @@ function mkCard(s, idx){
   });
   el.appendChild(meta);
 
-  /* risk score bar */
+  /* Risk skoru çubuğu: 0–1 arası risk_score değeri bar genişliği olarak gösterilir (% cinsinden) */
   const scoreRow = document.createElement("div");
   scoreRow.style.cssText = "margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--border-dim);" +
     "display:flex;align-items:center;gap:.5rem;position:relative;z-index:1";
@@ -696,6 +700,7 @@ function mkCard(s, idx){
   const track = document.createElement("div");
   track.style.cssText = "flex:1;height:2px;background:var(--border-dim);position:relative";
   const fill = document.createElement("div");
+  // Dolgu genişliği: risk_score [0,1] → [0%,100%] dönüşümü
   fill.style.cssText = `position:absolute;top:0;left:0;height:100%;width:${(s.risk_score*100).toFixed(1)}%;background:${color}`;
   track.appendChild(fill);
   const scoreVal = document.createElement("span");
@@ -704,22 +709,24 @@ function mkCard(s, idx){
   scoreRow.appendChild(scoreLbl); scoreRow.appendChild(track); scoreRow.appendChild(scoreVal);
   el.appendChild(scoreRow);
 
+  // Karta tıklanınca detay overlay'i açılır (tahmin grafiği + tüm metrikler)
   el.addEventListener("click", ()=>openDetail(s));
   return el;
 }
 
-/* Render cards */
+/* Tüm kartları ızgaraya (grid) ekler; her render öncesi önceki kartlar temizlenir */
 function renderCards(data){
   const g = document.getElementById("grid");
   g.textContent = "";
   data.forEach((s,i)=>g.appendChild(mkCard(s,i)));
 }
 
-/* Search */
+/* ── ARAMA VE FİLTRELEME ── */
 let searchQ = "";
 const searchInput = document.getElementById("search-input");
 const searchClear = document.getElementById("search-clear");
 
+// Kullanıcı her karakter girerken canlı arama yapar; temizle butonu görünürlüğü güncellenir
 searchInput.addEventListener("input", ()=>{
   searchQ = searchInput.value.trim().toLowerCase();
   searchClear.classList.toggle("visible", searchQ.length > 0);
@@ -734,9 +741,13 @@ function clearSearch(){
   applyFilters();
 }
 
+// Kategori filtresi (activeF) ve arama metni (searchQ) birlikte uygulanır
+// Ticker kodu veya şirket adında arama desteklenir
 function applyFilters(){
   let result = allData;
+  // Kategori filtresi: "all" seçiliyse tüm hisseler, aksi halde sadece seçilen seviye
   if(activeF !== "all") result = result.filter(s=>String(s.category_level)===activeF);
+  // Metin araması: büyük/küçük harf duyarsız, ticker ve şirket adında eşleşme
   if(searchQ){
     result = result.filter(s=>
       s.ticker.toLowerCase().includes(searchQ) ||
@@ -747,9 +758,9 @@ function applyFilters(){
   document.getElementById("no-results").style.display = result.length === 0 ? "block" : "none";
 }
 
-/* Filters */
+/* Kategori filtre butonları: data-f="1/2/3/4/all" özelliğine göre activeF güncellenir */
 document.querySelectorAll(".fbtn").forEach(b=>{
-  if(!b.dataset.f) return; // excel butonu gibi data-f olmayanları atla
+  if(!b.dataset.f) return; // data-f özelliği olmayan butonlar (Excel, Eşit Ağırlık vs.) atlanır
   b.addEventListener("click",()=>{
     activeF = b.dataset.f;
     document.querySelectorAll(".fbtn[data-f]").forEach(x=>x.classList.remove("on"));
@@ -841,9 +852,10 @@ function renderRank(data){
       row.appendChild(rl);row.appendChild(track);row.appendChild(sc);
       chart.appendChild(row);
 
-      /* animate bar after paint */
+      /* Bar animasyonu: her satır sırayla genişler (staggered animasyon).
+         risk_score [0,1] → bar genişliği [0%,100%] olarak çevrilir. */
       const pct=(s.risk_score*100).toFixed(2)+"%";
-      setTimeout(()=>{fill.style.width=pct;}, 80+animIdx*18);
+      setTimeout(()=>{fill.style.width=pct;}, 80+animIdx*18); // Her bar 18ms gecikmeli açılır
       animIdx++;
     });
   });
@@ -851,25 +863,29 @@ function renderRank(data){
   wrap.appendChild(chart);
 }
 
-/* Detail */
+/* ── HİSSE DETAY OVERLAY ── */
+// Karta tıklanınca tam ekran overlay açılır.
+// Metrikler hemen gösterilir; tahmin grafiği /api/forecast/{ticker} çağrısıyla async yüklenir.
 function openDetail(s){
-  const color=RC[s.category_level];
+  const color=RC[s.category_level]; // Kategoriye göre vurgu rengi
+  // Overlay başlık ve temel metrikleri doldur
   document.getElementById("dt-ticker").textContent=s.ticker;
   document.getElementById("dt-ticker").style.color=color;
   document.getElementById("dt-co").textContent=CO[s.ticker]||s.ticker;
   document.getElementById("dm-price").textContent=`₺${s.current_price.toLocaleString("tr-TR",{minimumFractionDigits:2})}`;
-  document.getElementById("dm-vol").textContent=`${(s.volatility*100).toFixed(2)}%`;
+  document.getElementById("dm-vol").textContent=`${(s.volatility*100).toFixed(2)}%`; // % cinsine çevir
   document.getElementById("dm-dd").textContent=`${(s.max_drawdown*100).toFixed(2)}%`;
   document.getElementById("dm-score").textContent=s.risk_score.toFixed(4);
   document.getElementById("dm-cat").textContent=s.category;
   document.getElementById("dm-cat").style.color=color;
   const fmt=v=>v!=null?`₺${v.toLocaleString("tr-TR",{minimumFractionDigits:2})}`:"—";
+  // 52 haftalık aralık: son 252 işlem gününün en yüksek ve en düşük kapanış fiyatı
   document.getElementById("dm-52w-tip").textContent=
     `52 Hafta En Yüksek: ${fmt(s.high_52w)}  ·  52 Hafta En Düşük: ${fmt(s.low_52w)}`;
   document.getElementById("dye-price").textContent="—";
   document.getElementById("dye-chg").textContent="";
 
-  /* loading dots */
+  /* Grafik yüklenene kadar animasyonlu nokta göster */
   const fc=document.getElementById("fc-chart");
   fc.textContent="";
   const dots=document.createElement("div");
@@ -1007,24 +1023,29 @@ function exportExcel(){
   XLSX.writeFile(wb, `BIST30_Risk_${tarih.replace(/\./g,"-")}.xlsx`);
 }
 
-/* ── REFRESH ── */
+/* ── YENİLEME ── */
+// Manuel yenileme: /api/refresh ile backend'e yeni hesaplama başlatılır,
+// ardından pollUntilReady ile sonuç beklenir ve arayüz güncellenir.
 async function triggerRefresh(){
   const btn=document.getElementById("refresh-btn");
-  if(btn.classList.contains("spinning")) return;
+  if(btn.classList.contains("spinning")) return; // Zaten yenileme devam ediyorsa tekrar başlatma
   btn.classList.add("spinning");
   document.getElementById("upd").textContent="YENİLENİYOR...";
   try{
-    await fetch("/api/refresh");
-    await pollUntilReady();
+    await fetch("/api/refresh");   // Backend'e yeni hesaplama komutu gönder
+    await pollUntilReady();        // Hesaplama bitene kadar bekle
   }catch(_){
     document.getElementById("upd").textContent="HATA — TEKRAR DENEYİN";
   }
   btn.classList.remove("spinning");
 }
 
+// 2 saniyede bir /api/status sorgusu yaparak backend'in hazır olmasını bekler.
+// Hazır olunca /api/risk verisini çeker ve tüm bileşenleri yeniden render eder.
+// Maks. 90 deneme (~3 dakika) yapılır.
 async function pollUntilReady(){
   for(let i=0;i<90;i++){
-    await new Promise(r=>setTimeout(r,2000));
+    await new Promise(r=>setTimeout(r,2000)); // 2 saniye bekle
     try{
       const st=await fetch("/api/status").then(r=>r.json());
       if(!st.loading && st.ready){
@@ -1033,10 +1054,10 @@ async function pollUntilReady(){
           allData=res.data;
           document.getElementById("upd").textContent=`SON GÜNCELLEME: ${res.last_update}`;
           renderStats(allData);
-          applyFilters();
-          renderRank(allData);
-          initPortfolio();
-          initComparison();
+          applyFilters();      // Kartları yeniden filtrele ve göster
+          renderRank(allData); // Risk sıralama tablosunu güncelle
+          initPortfolio();     // Portföy chip listesini yenile
+          initComparison();    // Karşılaştırma chip listesini yenile
           return;
         }
       }
@@ -1168,6 +1189,9 @@ function equalizeWeights(){
   if(btn){ btn.style.borderColor="#00ff7f"; btn.style.color="#00ff7f"; setTimeout(()=>{ btn.style.borderColor=""; btn.style.color=""; },700); }
 }
 
+// Portföy hesaplama isteğini backend'e gönderir.
+// Ticker'lar ve ağırlıklar virgülle ayrılmış string olarak gönderilir.
+// Backend ağırlıkları normalize eder (toplamları 100 olması şart değil).
 async function calcPortfolio(){
   if(portSel.size < 2){ alert("En az 2 hisse seçin."); return; }
   const tickers = [...portSel].join(",");
@@ -1175,12 +1199,14 @@ async function calcPortfolio(){
   const res = document.getElementById("port-results");
   res.style.display = "block";
   res.innerHTML = "";
+  // Hesaplama sırasında animasyonlu yükleme noktaları göster
   const dots = document.createElement("div"); dots.className = "dots";
   for(let i=0;i<3;i++){const d=document.createElement("div");d.className="dot";dots.appendChild(d);}
   res.appendChild(dots);
   try{
     const r = await fetch(`/api/portfolio?tickers=${encodeURIComponent(tickers)}&weights=${encodeURIComponent(weights)}`);
     const data = await r.json();
+    // 503: veri henüz hazır değil (backend hâlâ yüklüyor)
     if(r.status===503){ throw new Error("Veriler hâlâ yükleniyor — birkaç saniye bekleyip tekrar deneyin."); }
     if(!r.ok){ throw new Error(data.detail || `HTTP ${r.status}`); }
     renderPortResults(data);
@@ -1190,12 +1216,15 @@ async function calcPortfolio(){
   }
 }
 
+// Portföy analiz sonuçlarını ekrana çizer.
+// 4 metrik kutusu + son 2 yıllık (504 işlem günü) normalize edilmiş portföy değer grafiği.
+// Grafik baz=100 normalize: ilk günün değeri 100 kabul edilir, diğerleri buna göre ölçeklenir.
 function renderPortResults(d){
   const res = document.getElementById("port-results");
   res.textContent = "";
-  const color = RC[d.category_level];
+  const color = RC[d.category_level]; // Portföy risk kategorisine göre renk
 
-  // metrics
+  // 4 metrik kartı: Volatilite, Drawdown, Risk Skoru, Kategori
   const mg = document.createElement("div"); mg.className = "port-metrics";
   [
     ["Portföy Volatilitesi", (d.portfolio_volatility*100).toFixed(2)+"%"],
@@ -1207,12 +1236,12 @@ function renderPortResults(d){
     const l = document.createElement("div"); l.className = "pm-lbl"; l.textContent = lbl;
     const v = document.createElement("div"); v.className = "pm-val";
     v.textContent = val;
-    if(i===3) v.style.color = color;
+    if(i===3) v.style.color = color; // Kategori değeri renkli gösterilir
     pm.appendChild(l); pm.appendChild(v); mg.appendChild(pm);
   });
   res.appendChild(mg);
 
-  // chart
+  // Portföy kümülatif getiri grafiği (Plotly): drag ve zoom devre dışı (statik görünüm)
   const chartDiv = document.createElement("div"); chartDiv.id = "port-chart";
   res.appendChild(chartDiv);
   Plotly.newPlot("port-chart",[{
@@ -1373,32 +1402,34 @@ async function loadData(){
   for(;;){
     try{
       const st=await fetch("/api/status").then(r=>r.json());
+      // Her 3 denemede bir mesaj değişir (3 × 2sn = 6sn aralıklarla)
       lmsg.textContent=MSGS[Math.floor(n/3)%MSGS.length];
       if(st.ready){
         const res=await fetch("/api/risk").then(r=>r.json());
         if(!res.loading&&res.data&&res.data.length){
-          allData=res.data;
+          allData=res.data; // Global veri deposuna ata
           document.getElementById("upd").textContent=`SON GÜNCELLEME: ${res.last_update}`;
           renderStats(allData);
-          applyFilters();
-          renderRank(allData);
-          initPortfolio();
-          initComparison();
+          applyFilters();      // Hisse kartlarını göster
+          renderRank(allData); // Sıralama tablosunu çiz
+          initPortfolio();     // Portföy chip'lerini oluştur
+          initComparison();    // Karşılaştırma chip'lerini oluştur
+          // Loader ekranını fade-out ile kapat, ana uygulamayı göster
           const loader=document.getElementById("loader");
           loader.style.opacity="0";
           setTimeout(()=>{
             loader.style.display="none";
-            document.getElementById("app").classList.add("show");
+            document.getElementById("app").classList.add("show"); // opacity: 0 → 1 geçişi
           },620);
           return;
         }
       }
     }catch(_){}
-    await new Promise(r=>setTimeout(r,2000));
+    await new Promise(r=>setTimeout(r,2000)); // 2 saniye bekle, tekrar dene
     if(++n>90){lmsg.textContent="Bağlantı hatası — sayfayı yenileyin.";return;}
   }
 }
-loadData();
+loadData(); // Sayfa yüklenince hemen başlat
 </script>
 </body>
 </html>
